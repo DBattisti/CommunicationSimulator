@@ -58,7 +58,7 @@ static ContextId CONTEXT_ID = {1, 1};
  */
 static CommunicationPlugin comm_plugin = COMMUNICATION_PLUGIN_NULL;
 
-static int alarms = 4;
+static int alarms = 2;// Realizar somente uma conexão
 
 /**
  * SIGALRM handler

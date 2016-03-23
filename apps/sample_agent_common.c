@@ -36,6 +36,12 @@
 #include <signal.h>
 #include <time.h>
 
+#include <errno.h>
+#include <sys/socket.h>
+#include <resolv.h>
+#include <arpa/inet.h>
+#include <errno.h>
+
 #include <ieee11073.h>
 #include "communication/plugin/plugin_tcp_agent.h"
 #include "specializations/pulse_oximeter.h"
@@ -46,6 +52,74 @@
 
 intu8 AGENT_SYSTEM_ID_VALUE[] = { 0x11, 0x33, 0x55, 0x77, 0x99,
 					0xbb, 0xdd, 0xff};
+
+//MINHA MODIFICAÇÃO
+#define MY_PORT		9999
+#define MAXBUF		1024
+
+
+// char* socket()
+// {   int sockfd;
+// 	struct sockaddr_in self;
+// 	char buffer[MAXBUF];
+
+// 	/*---Create streaming socket---*/
+//     if ( (sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0 )
+// 	{
+// 		perror("Socket");
+// 		exit(errno);
+// 	}
+
+// 	/*---Initialize address/port structure---*/
+// 	bzero(&self, sizeof(self));
+// 	self.sin_family = AF_INET;
+// 	self.sin_port = htons(MY_PORT);
+// 	self.sin_addr.s_addr = INADDR_ANY;
+
+// 	/*---Assign a port number to the socket---*/
+//     if ( bind(sockfd, (struct sockaddr*)&self, sizeof(self)) != 0 )
+// 	{
+// 		perror("socket--bind");
+// 		exit(errno);
+// 	}
+
+// 	/*---Make it a "listening socket"---*/
+// 	if ( listen(sockfd, 20) != 0 )
+// 	{
+// 		perror("socket--listen");
+// 		exit(errno);
+// 	}
+
+// 	/*---Forever... ---*/
+// 	while (1)
+// 	{	int clientfd,size_answer;
+// 		char answer[MAXBUF];
+// 		struct sockaddr_in client_addr;
+// 		int addrlen=sizeof(client_addr);
+
+// 		/*---accept a connection (creating a data pipe)---*/
+// 		clientfd = accept(sockfd, (struct sockaddr*)&client_addr, &addrlen);
+// 		printf("%s:%d connected\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+		
+// 		if ((size_answer = read(clientfd,answer,MAXBUF)) < 0) {
+//             perror("Erro ao receber dados do cliente: ");
+//             return NULL;
+//         }
+// 		answer[size_answer] = '\0';
+//         printf("O cliente falou: %s\n", answer);
+		
+// 		/*---Echo back anything sent---*/
+// 		send(clientfd, buffer, recv(clientfd, buffer, MAXBUF, 0), 0);
+
+// 		/*---Close data connection---*/
+// 		close(clientfd);
+// 	}
+
+// 	/*---Clean up (should never get here!)---*/
+// 	close(sockfd);
+// 	return answer;
+// }
+
 
 /**
  * Generate data for oximeter event report
@@ -87,10 +161,96 @@ void *blood_pressure_event_report_cb()
 	time(&now);
 	localtime_r(&now, &nowtm);
 
-	data->systolic = 110 + random() % 30;
-	data->diastolic = 70 + random() % 20;
-	data->mean = 90 + random() % 10;
-	data->pulse_rate = 60 + random() % 30;
+	/////////
+	//MINHA MODIFICAÇÃO -- Socket para receber os dados do app
+	/////////
+	int sockfd;
+	struct sockaddr_in self;
+	char buffer[MAXBUF];
+	float sistolica = 0;
+	float diastolica = 0;
+	float frequencia = 0;
+
+	/*---Create streaming socket---*/
+    if ( (sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0 )
+	{
+		perror("Socket");
+		exit(errno);
+	}
+
+	/*---Initialize address/port structure---*/
+	bzero(&self, sizeof(self));
+	self.sin_family = AF_INET;
+	self.sin_port = htons(MY_PORT);
+	self.sin_addr.s_addr = INADDR_ANY;
+
+	/*---Assign a port number to the socket---*/
+    if ( bind(sockfd, (struct sockaddr*)&self, sizeof(self)) != 0 )
+	{
+		perror("socket--bind");
+		exit(errno);
+	}
+
+	/*---Make it a "listening socket"---*/
+	if ( listen(sockfd, 20) != 0 )
+	{
+		perror("socket--listen");
+		exit(errno);
+	}
+	printf("\n\nESPERANDO OS DADOS DO APLICATIVO...\n");
+	int aux = 0;
+	while (aux < 3){
+		int clientfd,size_answer;
+		char answer[MAXBUF];
+		struct sockaddr_in client_addr;
+		socklen_t addrlen=sizeof(client_addr);
+
+		/*---accept a connection (creating a data pipe)---*/
+		clientfd = accept(sockfd, (struct sockaddr*)&client_addr, &addrlen);
+		printf("%s:%d connected\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+		
+		if ((size_answer = read(clientfd,answer,MAXBUF)) < 0) {
+	        perror("Erro ao receber dados do cliente: ");
+	        return NULL;
+	    }
+
+	    answer[size_answer] = '\0';
+	    printf("O cliente falou: %s\n", answer);
+
+	    switch (aux){
+	    	case 0:
+	    		sistolica = atof(answer);
+	    		break;
+	    	case 1:
+	    		diastolica = atof(answer);
+	    		break;
+	    	case 2:
+	    		frequencia = atof(answer);
+	    		break;
+	    }
+		
+		
+		/*---Echo back anything sent---*/
+		send(clientfd, buffer, recv(clientfd, buffer, MAXBUF, 0), 0);
+
+		/*---Close data connection---*/
+		close(clientfd);
+		aux++;
+	}
+
+	/*---Clean up (should never get here!)---*/
+	close(sockfd);
+
+	/////////
+	//MINHA MODIFICAÇÃO
+	/////////
+
+
+	data->systolic = sistolica;
+	data->diastolic = diastolica;
+	//data->mean = 90 + random() % 10;
+	data->mean = (2*data->diastolic + data->systolic)/3;
+	data->pulse_rate = frequencia;
 
 	data->century = nowtm.tm_year / 100 + 19;
 	data->year = nowtm.tm_year % 100;
@@ -117,8 +277,80 @@ void *weightscale_event_report_cb()
 	time(&now);
 	localtime_r(&now, &nowtm);
 
-	data->weight = 70.2 + random() % 20;
+	/////////
+	//MINHA MODIFICAÇÃO -- Socket para receber os dados do app
+	/////////
+	int sockfd;
+	struct sockaddr_in self;
+	char buffer[MAXBUF];
+
+	/*---Create streaming socket---*/
+    if ( (sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0 )
+	{
+		perror("Socket");
+		exit(errno);
+	}
+
+	/*---Initialize address/port structure---*/
+	bzero(&self, sizeof(self));
+	self.sin_family = AF_INET;
+	self.sin_port = htons(MY_PORT);
+	self.sin_addr.s_addr = INADDR_ANY;
+
+	/*---Assign a port number to the socket---*/
+    if ( bind(sockfd, (struct sockaddr*)&self, sizeof(self)) != 0 )
+	{
+		perror("socket--bind");
+		exit(errno);
+	}
+
+	/*---Make it a "listening socket"---*/
+	if ( listen(sockfd, 20) != 0 )
+	{
+		perror("socket--listen");
+		exit(errno);
+	}
+
+	printf("\n\nESPERANDO OS DADOS DO APLICATIVO...\n");
+	
+	int clientfd,size_answer;
+	char answer[MAXBUF];
+	struct sockaddr_in client_addr;
+	socklen_t addrlen=sizeof(client_addr);
+
+	/*---accept a connection (creating a data pipe)---*/
+	clientfd = accept(sockfd, (struct sockaddr*)&client_addr, &addrlen);
+	printf("%s:%d connected\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+	
+	if ((size_answer = read(clientfd,answer,MAXBUF)) < 0) {
+        perror("Erro ao receber dados do cliente: ");
+        return NULL;
+    }
+	answer[size_answer] = '\0';
+    printf("O cliente falou: %s\n", answer);
+	
+	/*---Echo back anything sent---*/
+	send(clientfd, buffer, recv(clientfd, buffer, MAXBUF, 0), 0);
+
+	/*---Close data connection---*/
+	close(clientfd);
+	
+
+	/*---Clean up (should never get here!)---*/
+	close(sockfd);
+	
+
+	/////////
+	//MINHA MODIFICAÇÃO
+	/////////
+
+	// data->weight = 70.2 + random() % 20;
+	//Transforma a string answer para float 
+	data->weight = atof(answer);
 	data->bmi = 20.3 + random() % 10;
+
+	// data->weight = 70.2 + random() % 20;
+	// data->bmi = 20.3 + random() % 10;
 
 	data->century = nowtm.tm_year / 100 + 19;
 	data->year = nowtm.tm_year % 100;
